@@ -342,20 +342,22 @@ def analyze(df):
 def clean_data(messages_df):
     """Clean data และ extract ข้อมูลที่ต้องการ"""
     cleaned_data = []
-    
     for idx, row in messages_df.iterrows():
         try:
             user_msg, ai_msg = extract_message_content(row['raw_request'], row['raw_reply'])
-            
             # ข้ามข้อมูลที่ว่าง
             if not user_msg or not ai_msg:
                 continue
-            
             # Auto-detect intent
             detected_intent = classify_intent(user_msg)
             suggest_int = suggest_intent(user_msg)  # Suggestion for manual labeling
             risk = risk_level(detected_intent)
-            
+            # เพิ่มเงื่อนไข FAIL ถ้า ai_message มีคำต้องห้าม
+            fail_keywords = ["รอแอดมิน", "ไม่พบข้อมูล", "ไม่ทราบข้อมูล"]
+            ai_fail = any(kw in ai_msg for kw in fail_keywords)
+            if ai_fail:
+                detected_intent = "FAIL"
+                risk = "🔴 High"
             cleaned_data.append({
                 'user_message': user_msg,
                 'ai_message': ai_msg,
@@ -367,7 +369,6 @@ def clean_data(messages_df):
         except Exception as e:
             st.warning(f"⚠️ Error processing row {idx}: {str(e)}")
             continue
-    
     return pd.DataFrame(cleaned_data)
 
 def analyze_accuracy(cleaned_df):
@@ -1188,6 +1189,21 @@ elif menu == "� วิเคราะห์ผลลัพธ์":
                 else:
                     for factor in risk_factors:
                         st.warning(factor)
+                # Risk Distribution Chart
+                if 'risk_distribution' in risk_data:
+                    st.markdown("#### 📊 การกระจายความเสี่ยง (Risk Distribution)")
+                    risk_dist_df = pd.DataFrame(risk_data['risk_distribution'].items(), columns=['Risk Level', 'Count'])
+                    risk_dist_df['Percentage'] = (risk_dist_df['Count'] / risk_dist_df['Count'].sum() * 100).round(2)
+                    fig = px.pie(risk_dist_df, names='Risk Level', values='Count', title='Risk Distribution',
+                                 color_discrete_sequence=['#2ecc71', '#f39c12', '#e74c3c'])
+                    st.plotly_chart(fig, use_container_width=True)
+                    st.dataframe(risk_dist_df, use_container_width=True)
+
+                # Top Fail Cases Table
+                if 'top_fail_cases' in risk_data and risk_data['top_fail_cases']:
+                    st.markdown("#### 🚨 Top Fail Cases (AI ตอบผิด/FAIL)")
+                    fail_df = pd.DataFrame(risk_data['top_fail_cases'])
+                    st.dataframe(fail_df, use_container_width=True)
             
             st.markdown("---")
             st.subheader("💡 คำแนะนำ:")
@@ -1433,7 +1449,7 @@ elif menu == "�📊 ดูสถิติ":
                 else:
                     st.warning("⚠️ ต้องมี intent_true labeled อย่างน้อย 1 row")
             else:
-                st.warning("⚠️ ต้อง Clean & Extract data ก่อน")
+                st.warning("⚠️ ต้องมี cleaned data กับ labeled intents ก่อน")
         
         with insight_tab2:
             st.markdown("### 🎯 System Health Status")
